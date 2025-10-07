@@ -31,72 +31,58 @@ public class AuthController : ControllerBase
         return Challenge(properties, "Google");
     }
 
-[HttpGet("google-callback")]
-public async Task<IActionResult> GoogleCallback()
-{
-    try
+    [HttpGet("google-callback")]
+    public async Task<IActionResult> GoogleCallback()
     {
-        var authenticateResult = await HttpContext.AuthenticateAsync("Google");
-        
-        if (!authenticateResult.Succeeded)
+        try
         {
-            var errorMessage = authenticateResult.Failure?.Message ?? "Unknown error";
-            Console.WriteLine($"Google auth failed: {errorMessage}");
-            return BadRequest(new { error = "Google authentication failed", details = errorMessage });
-        }
-        
-        var claims = authenticateResult.Principal!.Claims;
-        
-        // Log all claims to see what we got
-        Console.WriteLine("=== Google Claims ===");
-        foreach (var claim in claims)
-        {
-            Console.WriteLine($"{claim.Type}: {claim.Value}");
-        }
-        
-        var email = claims.FirstOrDefault(c => c.Type == ClaimTypes.Email)?.Value;
-        var name = claims.FirstOrDefault(c => c.Type == ClaimTypes.Name)?.Value;
-        var providerId = claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
-        var avatarUrl = claims.FirstOrDefault(c => c.Type == "picture")?.Value;
-        
-        if (email == null || providerId == null)
-        {
-            Console.WriteLine($"Missing data - Email: {email}, ProviderId: {providerId}");
-            return BadRequest(new { error = "Failed to get user info from Google" });
-        }
-
-        var user = await _context.Users
-            .FirstOrDefaultAsync(u => u.Provider == "Google" && u.ProviderId == providerId);
-
-        if (user == null)
-        {
-            Console.WriteLine("Creating new user");
-            user = new User
+            var authenticateResult = await HttpContext.AuthenticateAsync("Google");
+            
+            if (!authenticateResult.Succeeded)
             {
-                Email = email,
-                Name = name,
-                Provider = "Google",
-                ProviderId = providerId,
-                AvatarUrl = avatarUrl
-            };
-            _context.Users.Add(user);
-            await _context.SaveChangesAsync();
+                var errorMessage = authenticateResult.Failure?.Message ?? "Unknown error";
+                Console.WriteLine($"Google auth failed: {errorMessage}");
+                return BadRequest(new { error = "Google authentication failed", details = errorMessage });
+            }
+            
+            var claims = authenticateResult.Principal!.Claims;
+            var email = claims.FirstOrDefault(c => c.Type == ClaimTypes.Email)?.Value;
+            var name = claims.FirstOrDefault(c => c.Type == ClaimTypes.Name)?.Value;
+            var providerId = claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
+            var avatarUrl = claims.FirstOrDefault(c => c.Type == "picture")?.Value;
+            
+            if (email == null || providerId == null)
+            {
+                return BadRequest(new { error = "Failed to get user info from Google" });
+            }
+            
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == email);
+
+            if (user == null)
+            {
+                user = new User
+                {
+                    Email = email,
+                    Name = name,
+                    Provider = "Google",
+                    ProviderId = providerId,
+                    AvatarUrl = avatarUrl
+                };
+                _context.Users.Add(user);
+                await _context.SaveChangesAsync();
+            }
+            
+            var token = _jwtService.GenerateToken(user);
+            
+            return Redirect($"http://localhost:3000/auth/callback?token={token}");
         }
-        
-        var token = _jwtService.GenerateToken(user);
-        
-        Console.WriteLine($"Generated token for user {user.Email}");
-        
-        return Redirect($"http://localhost:3000/auth/callback?token={token}");
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Exception in GoogleCallback: {ex.Message}");
+            throw;
+        }
     }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"Exception in GoogleCallback: {ex.Message}");
-        Console.WriteLine($"Stack trace: {ex.StackTrace}");
-        throw;
-    }
-}
-    
+
     [HttpGet("github")]
     public IActionResult GitHubLogin()
     {
@@ -110,43 +96,49 @@ public async Task<IActionResult> GoogleCallback()
     [HttpGet("github-callback")]
     public async Task<IActionResult> GitHubCallback()
     {
-        var authenticateResult = await HttpContext.AuthenticateAsync("GitHub");
-        
-        if (!authenticateResult.Succeeded)
-            return BadRequest(new { error = "GitHub authentication failed" });
-
-        var claims = authenticateResult.Principal!.Claims;
-        var email = claims.FirstOrDefault(c => c.Type == ClaimTypes.Email)?.Value;
-        var name = claims.FirstOrDefault(c => c.Type == ClaimTypes.Name)?.Value;
-        var providerId = claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
-        var avatarUrl = claims.FirstOrDefault(c => c.Type == "urn:github:avatar")?.Value;
-
-        if (providerId == null)
-            return BadRequest(new { error = "Failed to get user info from GitHub" });
-
-        // GitHub doesn't always provide email
-        email ??= $"{providerId}@github.user";
-
-        var user = await _context.Users
-            .FirstOrDefaultAsync(u => u.Provider == "GitHub" && u.ProviderId == providerId);
-
-        if (user == null)
+        try
         {
-            user = new User
+            var authenticateResult = await HttpContext.AuthenticateAsync("GitHub");
+        
+            if (!authenticateResult.Succeeded)
+                return BadRequest(new { error = "GitHub authentication failed" });
+
+            var claims = authenticateResult.Principal!.Claims;
+            var email = claims.FirstOrDefault(c => c.Type == ClaimTypes.Email)?.Value;
+            var name = claims.FirstOrDefault(c => c.Type == ClaimTypes.Name)?.Value;
+            var providerId = claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
+            var avatarUrl = claims.FirstOrDefault(c => c.Type == "urn:github:avatar")?.Value;
+
+            if (providerId == null)
+                return BadRequest(new { error = "Failed to get user info from GitHub" });
+            
+            email ??= $"{providerId}@github.user";
+            
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == email);
+
+            if (user == null)
             {
-                Email = email,
-                Name = name ?? "GitHub User",
-                Provider = "GitHub",
-                ProviderId = providerId,
-                AvatarUrl = avatarUrl
-            };
-            _context.Users.Add(user);
-            await _context.SaveChangesAsync();
+                user = new User
+                {
+                    Email = email,
+                    Name = name ?? "GitHub User",
+                    Provider = "GitHub",
+                    ProviderId = providerId,
+                    AvatarUrl = avatarUrl
+                };
+                _context.Users.Add(user);
+                await _context.SaveChangesAsync();
+            }
+
+            var token = _jwtService.GenerateToken(user);
+
+            return Redirect($"http://localhost:3000/auth/callback?token={token}");
         }
-
-        var token = _jwtService.GenerateToken(user);
-
-        return Redirect($"http://localhost:3000/auth/callback?token={token}");
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Exception in GitHubCallback: {ex.Message}");
+            throw;
+        }
     }
     
     [HttpGet("me")]
