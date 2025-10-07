@@ -31,28 +31,46 @@ public class AuthController : ControllerBase
         return Challenge(properties, "Google");
     }
 
-    [HttpGet("google-callback")]
-    public async Task<IActionResult> GoogleCallback()
+[HttpGet("google-callback")]
+public async Task<IActionResult> GoogleCallback()
+{
+    try
     {
         var authenticateResult = await HttpContext.AuthenticateAsync("Google");
         
         if (!authenticateResult.Succeeded)
-            return BadRequest(new { error = "Google authentication failed" });
+        {
+            var errorMessage = authenticateResult.Failure?.Message ?? "Unknown error";
+            Console.WriteLine($"Google auth failed: {errorMessage}");
+            return BadRequest(new { error = "Google authentication failed", details = errorMessage });
+        }
         
         var claims = authenticateResult.Principal!.Claims;
+        
+        // Log all claims to see what we got
+        Console.WriteLine("=== Google Claims ===");
+        foreach (var claim in claims)
+        {
+            Console.WriteLine($"{claim.Type}: {claim.Value}");
+        }
+        
         var email = claims.FirstOrDefault(c => c.Type == ClaimTypes.Email)?.Value;
         var name = claims.FirstOrDefault(c => c.Type == ClaimTypes.Name)?.Value;
         var providerId = claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
         var avatarUrl = claims.FirstOrDefault(c => c.Type == "picture")?.Value;
         
         if (email == null || providerId == null)
+        {
+            Console.WriteLine($"Missing data - Email: {email}, ProviderId: {providerId}");
             return BadRequest(new { error = "Failed to get user info from Google" });
+        }
 
         var user = await _context.Users
             .FirstOrDefaultAsync(u => u.Provider == "Google" && u.ProviderId == providerId);
 
         if (user == null)
         {
+            Console.WriteLine("Creating new user");
             user = new User
             {
                 Email = email,
@@ -67,9 +85,17 @@ public class AuthController : ControllerBase
         
         var token = _jwtService.GenerateToken(user);
         
-        // Redirect to frontend with token
+        Console.WriteLine($"Generated token for user {user.Email}");
+        
         return Redirect($"http://localhost:3000/auth/callback?token={token}");
     }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Exception in GoogleCallback: {ex.Message}");
+        Console.WriteLine($"Stack trace: {ex.StackTrace}");
+        throw;
+    }
+}
     
     [HttpGet("github")]
     public IActionResult GitHubLogin()

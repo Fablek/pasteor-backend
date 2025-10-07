@@ -19,6 +19,17 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 // Add JwtService
 builder.Services.AddScoped<JwtService>();
 
+// Add Data Protection
+builder.Services.AddDataProtection();
+
+builder.Services.AddDistributedMemoryCache();
+builder.Services.AddSession(options =>
+{
+    options.Cookie.HttpOnly = true;
+    options.Cookie.IsEssential = true;
+    options.Cookie.SameSite = SameSiteMode.Lax;
+});
+
 // Configure Authentication
 builder.Services.AddAuthentication(options =>
 {
@@ -39,11 +50,16 @@ builder.Services.AddAuthentication(options =>
             Encoding.UTF8.GetBytes(builder.Configuration["Authentication:Jwt:Key"]!))
     };
 })
+.AddCookie(options =>
+{
+    options.Cookie.SameSite = SameSiteMode.Lax;
+})
 .AddGoogle(options =>
 {
     options.ClientId = builder.Configuration["Authentication:Google:ClientId"]!;
     options.ClientSecret = builder.Configuration["Authentication:Google:ClientSecret"]!;
     options.SignInScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+    options.SaveTokens = true;
 })
 .AddGitHub(options =>
 {
@@ -51,17 +67,17 @@ builder.Services.AddAuthentication(options =>
     options.ClientSecret = builder.Configuration["Authentication:GitHub:ClientSecret"]!;
     options.SignInScheme = CookieAuthenticationDefaults.AuthenticationScheme;
     options.Scope.Add("user:email");
-})
-.AddCookie();
+    options.SaveTokens = true;
+});
 
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
     {
         policy.WithOrigins("http://localhost:3000")
-            .AllowAnyHeader()
-            .AllowAnyMethod()
-            .AllowCredentials();
+              .AllowAnyHeader()
+              .AllowAnyMethod()
+              .AllowCredentials();
     });
 });
 
@@ -76,6 +92,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors("AllowFrontend");
+app.UseSession();
 app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
