@@ -10,4 +10,6 @@ public class Paste
     public DateTime? ExpiresAt { get; set; }
     public int Views { get; set; } = 0;
     public string? CreatedByIp { get; set; }
+    public int? UserId { get; set; }
+    public User? User { get; set; }
 }
