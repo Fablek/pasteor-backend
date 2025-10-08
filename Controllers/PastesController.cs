@@ -111,10 +111,6 @@ public class PastesController : ControllerBase
         {
             return NotFound(new { error = "Paste has expired" });
         }
-    
-        // Increment views
-        paste.Views++;
-        await _context.SaveChangesAsync();
 
         // Check if current user is owner
         bool isOwner = false;
@@ -125,6 +121,12 @@ public class PastesController : ControllerBase
             {
                 isOwner = paste.UserId == userId;
             }
+        }
+        
+        if (!isOwner)
+        {
+            paste.Views++;
+            await _context.SaveChangesAsync();
         }
 
         // Return DTO instead of raw model
