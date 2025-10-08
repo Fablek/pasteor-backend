@@ -12,8 +12,8 @@ using pasteor_backend.Data;
 namespace pasteor_backend.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20251007165308_AddUsers")]
-    partial class AddUsers
+    [Migration("20251008160008_InitialCreate")]
+    partial class InitialCreate
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
