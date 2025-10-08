@@ -154,7 +154,10 @@ public class PastesController : ControllerBase
     [HttpGet("my")]
     public async Task<ActionResult<MyPastesResponse>> GetMyPastes(
         [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 20)
+        [FromQuery] int pageSize = 20,
+        [FromQuery] string? search = null,
+        [FromQuery] string? language = null,
+        [FromQuery] string? sortBy = "date")
     {
         if (User.Identity?.IsAuthenticated != true)
             return Unauthorized(new { error = "Authentication required" });
@@ -167,8 +170,29 @@ public class PastesController : ControllerBase
         if (pageSize < 1 || pageSize > 100) pageSize = 20;
 
         var query = _context.Pastes
-            .Where(p => p.UserId == userId)
-            .OrderByDescending(p => p.CreatedAt);
+            .Where(p => p.UserId == userId);
+        
+        // Search filter
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            query = query.Where(p => 
+                (p.Title != null && p.Title.Contains(search)) ||
+                p.Content.Contains(search));
+        }
+        
+        // Language filter
+        if (!string.IsNullOrWhiteSpace(language) && language != "all")
+        {
+            query = query.Where(p => p.Language == language);
+        }
+        
+        // Sorting
+        query = sortBy?.ToLower() switch
+        {
+            "views" => query.OrderByDescending(p => p.Views),
+            "title" => query.OrderBy(p => p.Title ?? p.Id),
+            _ => query.OrderByDescending(p => p.CreatedAt) // default: date
+        };
 
         var totalCount = await query.CountAsync();
         var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
@@ -247,6 +271,27 @@ public class PastesController : ControllerBase
         };
 
         return Ok(stats);
+    }
+    
+    // GET: api/pastes/languages
+    [HttpGet("languages")]
+    public async Task<ActionResult<List<string>>> GetUserLanguages()
+    {
+        if (User.Identity?.IsAuthenticated != true)
+            return Unauthorized(new { error = "Authentication required" });
+        
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (!int.TryParse(userIdClaim, out int userId))
+            return Unauthorized(new { error = "Invalid user" });
+        
+        var languages = await _context.Pastes
+            .Where(p => p.UserId == userId)
+            .Select(p => p.Language)
+            .Distinct()
+            .OrderBy(l => l)
+            .ToListAsync();
+
+        return Ok(languages);
     }
 
     private string GenerateShortId()
