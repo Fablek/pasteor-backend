@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using pasteor_backend.Data;
 using pasteor_backend.Models;
+using System.Security.Claims;
 
 namespace pasteor_backend.Controllers;
 
@@ -52,6 +53,17 @@ public class PastesController : ControllerBase
         
         // Get user IP
         var clientIP = HttpContext.Connection.RemoteIpAddress?.ToString();
+        
+        // Check if user is authenticated
+        int? userId = null;
+        if (User.Identity?.IsAuthenticated == true)
+        {
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (int.TryParse(userIdClaim, out int parsedUserId))
+            {
+                userId = parsedUserId;
+            }
+        }
 
         var paste = new Paste
         {
@@ -60,7 +72,8 @@ public class PastesController : ControllerBase
             Title = request.Title,
             Language = request.Language ?? "plaintext",
             ExpiresAt = expiresAt,
-            CreatedByIp = clientIP
+            CreatedByIp = clientIP,
+            UserId = userId
         };
 
         _context.Pastes.Add(paste);
@@ -73,7 +86,8 @@ public class PastesController : ControllerBase
             Language = paste.Language,
             CreatedAt = paste.CreatedAt,
             ExpiresAt = paste.ExpiresAt,
-            Url = $"{Request.Scheme}://{Request.Host}/api/pastes/{paste.Id}"
+            Url = $"{Request.Scheme}://{Request.Host}/api/pastes/{paste.Id}",
+            IsOwner = userId.HasValue
         };
         
         return CreatedAtAction(nameof(GetPaste), new { id = paste.Id }, response);
@@ -81,26 +95,156 @@ public class PastesController : ControllerBase
     
     // GET: api/pastes/{id}
     [HttpGet("{id}")]
-    public async Task<ActionResult<Paste>> GetPaste(string id)
+    public async Task<ActionResult<PasteDetailResponse>> GetPaste(string id)
     {
-        var paste = await _context.Pastes.FindAsync(id);
+        var paste = await _context.Pastes
+            .Include(p => p.User)
+            .FirstOrDefaultAsync(p => p.Id == id);
 
         if (paste == null)
         {
             return NotFound(new { error = "Paste not found" });
         }
-        
+    
         // Check if paste expired
         if (paste.ExpiresAt.HasValue && paste.ExpiresAt.Value < DateTime.UtcNow)
         {
             return NotFound(new { error = "Paste has expired" });
         }
-        
+    
         // Increment views
         paste.Views++;
         await _context.SaveChangesAsync();
+
+        // Check if current user is owner
+        bool isOwner = false;
+        if (User.Identity?.IsAuthenticated == true)
+        {
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (int.TryParse(userIdClaim, out int userId))
+            {
+                isOwner = paste.UserId == userId;
+            }
+        }
+
+        // Return DTO instead of raw model
+        var response = new PasteDetailResponse
+        {
+            Id = paste.Id,
+            Content = paste.Content,
+            Title = paste.Title,
+            Language = paste.Language,
+            CreatedAt = paste.CreatedAt,
+            ExpiresAt = paste.ExpiresAt,
+            Views = paste.Views,
+            IsOwner = isOwner,
+            Author = paste.User != null ? new AuthorInfo
+            {
+                Name = paste.User.Name ?? "Anonymous",
+                AvatarUrl = paste.User.AvatarUrl
+            } : null
+        };
+    
+        return Ok(response);
+    }
+    
+    // GET: api/pastes/my
+    [HttpGet("my")]
+    public async Task<ActionResult<MyPastesResponse>> GetMyPastes(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 20)
+    {
+        if (User.Identity?.IsAuthenticated != true)
+            return Unauthorized(new { error = "Authentication required" });
+
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (!int.TryParse(userIdClaim, out int userId))
+            return Unauthorized(new { error = "Invalid user" });
+
+        if (page < 1) page = 1;
+        if (pageSize < 1 || pageSize > 100) pageSize = 20;
+
+        var query = _context.Pastes
+            .Where(p => p.UserId == userId)
+            .OrderByDescending(p => p.CreatedAt);
+
+        var totalCount = await query.CountAsync();
+        var totalPages = (int)Math.Ceiling(totalCount / (double)pageSize);
+
+        var pastes = await query
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(p => new PasteListItem
+            {
+                Id = p.Id,
+                Title = p.Title,
+                Language = p.Language,
+                CreatedAt = p.CreatedAt,
+                ExpiresAt = p.ExpiresAt,
+                Views = p.Views,
+                Preview = p.Content.Length > 100 ? p.Content.Substring(0, 100) + "..." : p.Content
+            })
+            .ToListAsync();
+
+        return Ok(new MyPastesResponse
+        {
+            Pastes = pastes,
+            TotalCount = totalCount,
+            Page = page,
+            PageSize = pageSize,
+            TotalPages = totalPages
+        });
+    }
+
+    // DELETE: api/pastes/{id}
+    [HttpDelete("{id}")]
+    public async Task<IActionResult> DeletePaste(string id)
+    {
+        if (User.Identity?.IsAuthenticated != true)
+            return Unauthorized(new { error = "Authentication required" });
+
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (!int.TryParse(userIdClaim, out int userId))
+            return Unauthorized(new { error = "Invalid user" });
+
+        var paste = await _context.Pastes.FindAsync(id);
         
-        return Ok(paste);
+        if (paste == null)
+            return NotFound(new { error = "Paste not found" });
+
+        if (paste.UserId != userId)
+            return Forbid();
+
+        _context.Pastes.Remove(paste);
+        await _context.SaveChangesAsync();
+
+        return NoContent();
+    }
+
+    // GET: api/pastes/stats
+    [HttpGet("stats")]
+    public async Task<ActionResult<UserStatsResponse>> GetUserStats()
+    {
+        if (User.Identity?.IsAuthenticated != true)
+            return Unauthorized(new { error = "Authentication required" });
+
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (!int.TryParse(userIdClaim, out int userId))
+            return Unauthorized(new { error = "Invalid user" });
+
+        var pastes = await _context.Pastes
+            .Where(p => p.UserId == userId)
+            .ToListAsync();
+
+        var stats = new UserStatsResponse
+        {
+            TotalPastes = pastes.Count,
+            TotalViews = pastes.Sum(p => p.Views),
+            ActivePastes = pastes.Count(p => !p.ExpiresAt.HasValue || p.ExpiresAt > DateTime.UtcNow),
+            MostViewedPaste = pastes.OrderByDescending(p => p.Views).FirstOrDefault()?.Id
+        };
+
+        return Ok(stats);
     }
 
     private string GenerateShortId()
@@ -129,4 +273,52 @@ public record PasteResponse
     public DateTime CreatedAt { get; init; }
     public DateTime? ExpiresAt { get; init; }
     public string Url { get; init; } = string.Empty;
+    public bool IsOwner { get; init; }
+}
+
+public record PasteListItem
+{
+    public string Id { get; init; } = string.Empty;
+    public string? Title { get; init; }
+    public string Language { get; init; } = string.Empty;
+    public DateTime CreatedAt { get; init; }
+    public DateTime? ExpiresAt { get; init; }
+    public int Views { get; init; }
+    public string Preview { get; init; } = string.Empty;
+}
+
+public record MyPastesResponse
+{
+    public List<PasteListItem> Pastes { get; init; } = new();
+    public int TotalCount { get; init; }
+    public int Page { get; init; }
+    public int PageSize { get; init; }
+    public int TotalPages { get; init; }
+}
+
+public record UserStatsResponse
+{
+    public int TotalPastes { get; init; }
+    public int TotalViews { get; init; }
+    public int ActivePastes { get; init; }
+    public string? MostViewedPaste { get; init; }
+}
+
+public record PasteDetailResponse
+{
+    public string Id { get; init; } = string.Empty;
+    public string Content { get; init; } = string.Empty;
+    public string? Title { get; init; }
+    public string Language { get; init; } = string.Empty;
+    public DateTime CreatedAt { get; init; }
+    public DateTime? ExpiresAt { get; init; }
+    public int Views { get; init; }
+    public bool IsOwner { get; init; }
+    public AuthorInfo? Author { get; init; }
+}
+
+public record AuthorInfo
+{
+    public string Name { get; init; } = string.Empty;
+    public string? AvatarUrl { get; init; }
 }
