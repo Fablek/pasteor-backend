@@ -290,6 +290,58 @@ public class PastesController : ControllerBase
             TotalPages = totalPages
         });
     }
+    
+    // PUT: api/pastes/{id}
+    [HttpPut("{id}")]
+    public async Task<ActionResult<PasteResponse>> UpdatePaste(string id, [FromBody] UpdatePasteRequest request)
+    {
+        if (User.Identity?.IsAuthenticated != true)
+            return Unauthorized(new { error = "Authentication required" });
+
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (!int.TryParse(userIdClaim, out int userId))
+            return Unauthorized(new { error = "Invalid user" });
+
+        var paste = await _context.Pastes.FindAsync(id);
+
+        if (paste == null)
+            return NotFound(new { error = "Paste not found" });
+        
+        if (paste.UserId != userId)
+            return Forbid();
+
+        // Validation
+        if (!string.IsNullOrWhiteSpace(request.Content))
+        {
+            if (request.Content.Length > 524288)
+                return BadRequest(new { error = "Content too large (max 512KB)" });
+
+            paste.Content = request.Content;
+        }
+        
+        if (request.Title != null)
+        {
+            paste.Title = request.Title;
+        }
+        
+        if (!string.IsNullOrWhiteSpace(request.Language))
+        {
+            paste.Language = request.Language;
+        }
+        
+        await _context.SaveChangesAsync();
+        
+        return Ok(new PasteResponse
+        {
+            Id = paste.Id,
+            Title = paste.Title,
+            Language = paste.Language,
+            CreatedAt = paste.CreatedAt,
+            ExpiresAt = paste.ExpiresAt,
+            Url = $"{Request.Scheme}://{Request.Host}/api/pastes/{paste.Id}",
+            IsOwner = true
+        });
+    }
 
     // DELETE: api/pastes/{id}
     [HttpDelete("{id}")]
@@ -410,6 +462,13 @@ public record MyPastesResponse
     public int Page { get; init; }
     public int PageSize { get; init; }
     public int TotalPages { get; init; }
+}
+
+public record UpdatePasteRequest
+{
+    public string? Content { get; init; }
+    public string? Title { get; init; }
+    public string? Language { get; init; }
 }
 
 public record UserStatsResponse
