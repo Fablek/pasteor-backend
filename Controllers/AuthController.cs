@@ -5,6 +5,7 @@ using pasteor_backend.Data;
 using pasteor_backend.Models;
 using pasteor_backend.Services;
 using System.Security.Claims;
+using Microsoft.AspNetCore.Identity.Data;
 
 namespace pasteor_backend.Controllers;
 
@@ -141,6 +142,73 @@ public class AuthController : ControllerBase
         }
     }
     
+    // POST: api/auth/register
+    [HttpPost("register")]
+    public async Task<IActionResult> Register([FromBody] RegisterRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password))
+            return BadRequest(new { error = "Email and password are required" });
+        
+        if (request.Password.Length < 6)
+            return BadRequest(new { error = "Password must be at least 6 characters" });
+        
+        // Check if user exists
+        var existingUser = await _context.Users.FirstOrDefaultAsync(u => u.Email == request.Email);
+        if (existingUser != null)
+            return BadRequest(new { error = "User with this email already exists" });
+        
+        // Hash password
+        var passwordHash = BCrypt.Net.BCrypt.HashPassword(request.Password);
+
+        var user = new User
+        {
+            Email = request.Email,
+            Name = request.Name ?? request.Email.Split('@')[0],
+            Provider = "Local",
+            ProviderId = null,
+            PasswordHash = passwordHash
+        };
+
+        _context.Users.Add(user);
+        await _context.SaveChangesAsync();
+        
+        var token = _jwtService.GenerateToken(user);
+        
+        return Ok(new { token, user = new {
+            user.Id,
+            user.Email,
+            user.Name,
+            user.Provider
+        }});
+    }
+    
+    // POST: api/auth/login
+    [HttpPost("login")]
+    public async Task<IActionResult> Login([FromBody] LoginRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password))
+            return BadRequest(new { error = "Email and password are required" });
+        
+        var user = await _context.Users.FirstOrDefaultAsync(u => 
+            u.Email == request.Email && u.Provider == "Local");
+        
+        if (user == null)
+            return Unauthorized(new { error = "Invalid email or password" });
+        
+        // Verify password
+        if (user.PasswordHash == null || !BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
+            return Unauthorized(new { error = "Invalid email or password" });
+        
+        var token = _jwtService.GenerateToken(user);
+        
+        return Ok(new { token, user = new {
+            user.Id,
+            user.Email,
+            user.Name,
+            user.Provider
+        }});
+    }
+    
     [HttpGet("me")]
     public async Task<IActionResult> GetCurrentUser()
     {
@@ -163,4 +231,17 @@ public class AuthController : ControllerBase
             user.Provider
         });
     }
+}
+
+public record RegisterRequest
+{
+    public string Email { get; init; } = string.Empty;
+    public string Password { get; init; } = string.Empty;
+    public string? Name { get; init; }
+}
+
+public record LoginRequest
+{
+    public string Email { get; init; } = string.Empty;
+    public string Password { get; init; } = string.Empty;
 }

@@ -150,6 +150,75 @@ public class PastesController : ControllerBase
         return Ok(response);
     }
     
+    // GET: api/pastes/recent
+    [HttpGet("recent")]
+    public async Task<ActionResult<List<RecentPasteItem>>> GetRecentPastes([FromQuery] int limit = 10)
+    {
+        if (limit < 1 || limit > 50) limit = 50;
+
+        var pastes = await _context.Pastes
+            .Include(p => p.User)
+            .Where(p => !p.ExpiresAt.HasValue || p.ExpiresAt > DateTime.UtcNow)
+            .OrderByDescending(p => p.CreatedAt)
+            .Take(limit)
+            .Select(p => new RecentPasteItem
+            {
+                Id = p.Id,
+                Title = p.Title,
+                Language = p.Language,
+                CreatedAt = p.CreatedAt,
+                Views = p.Views,
+                AuthorName = p.User != null ? p.User.Name ?? "Anonymous" : "Anonymous",
+                Preview = p.Content.Length > 100 ? p.Content.Substring(0, 100) + "..." : p.Content
+            })
+            .ToListAsync();
+        
+        return Ok(pastes);
+    }
+    
+    // GET: api/pastes/public-stats
+    [HttpGet("public-stats")]
+    public async Task<ActionResult<PublicStatsResponse>> GetPublicStats()
+    {
+        var totalPastes = await _context.Pastes.CountAsync();
+        var totalUsers = await _context.Users.CountAsync();
+        
+        var languageStats = await _context.Pastes
+            .GroupBy(p => p.Language)
+            .Select(g => new LanguageStats
+            {
+                Language = g.Key,
+                Count = g.Count()
+            })
+            .OrderByDescending(x => x.Count)
+            .Take(5)
+            .ToListAsync();
+        
+        var popularPastes = await _context.Pastes
+            .Include(p => p.User)
+            .Where(p => !p.ExpiresAt.HasValue || p.ExpiresAt > DateTime.UtcNow)
+            .OrderByDescending(p => p.Views)
+            .Take(5)
+            .Select(p => new PopularPasteItem
+            {
+                Id = p.Id,
+                Title = p.Title,
+                Language = p.Language,
+                Views = p.Views,
+                CreatedAt = p.CreatedAt,
+                AuthorName = p.User != null ? p.User.Name ?? "Anonymous" : "Anonymous"
+            })
+            .ToListAsync();
+
+        return Ok(new PublicStatsResponse
+        {
+            TotalPastes = totalPastes,
+            TotalUsers = totalUsers,
+            TopLanguages = languageStats,
+            PopularPastes = popularPastes
+        });
+    }
+    
     // GET: api/pastes/my
     [HttpGet("my")]
     public async Task<ActionResult<MyPastesResponse>> GetMyPastes(
@@ -368,4 +437,39 @@ public record AuthorInfo
 {
     public string Name { get; init; } = string.Empty;
     public string? AvatarUrl { get; init; }
+}
+
+public record RecentPasteItem
+{
+    public string Id { get; init; } = string.Empty;
+    public string? Title { get; init; }
+    public string Language { get; init; } = string.Empty;
+    public DateTime CreatedAt { get; init; }
+    public int Views { get; init; }
+    public string AuthorName { get; init; } = string.Empty;
+    public string Preview { get; init; } = string.Empty;
+}
+
+public record PublicStatsResponse
+{
+    public int TotalPastes { get; init; }
+    public int TotalUsers { get; init; }
+    public List<LanguageStats> TopLanguages { get; init; } = new();
+    public List<PopularPasteItem> PopularPastes { get; init; } = new();
+}
+
+public record LanguageStats
+{
+    public string Language { get; init; } = string.Empty;
+    public int Count { get; init; }
+}
+
+public record PopularPasteItem
+{
+    public string Id { get; init; } = string.Empty;
+    public string? Title { get; init; }
+    public string Language { get; init; } = string.Empty;
+    public int Views { get; init; }
+    public DateTime CreatedAt { get; init; }
+    public string AuthorName { get; init; } = string.Empty;
 }

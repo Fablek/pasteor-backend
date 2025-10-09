@@ -6,8 +6,9 @@ public class User
     public string Email { get; set; } = null!;
     public string? Name { get; set; }
     public string? AvatarUrl { get; set; }
-    public string Provider { get; set; } = null!; // "Google" or "GitHub"
-    public string ProviderId { get; set; } = null!; // ID from OAuth provider
+    public string Provider { get; set; } = null!; // "Google", "GitHub", "Local"
+    public string? ProviderId { get; set; }
+    public string? PasswordHash { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     
     // Navigation property

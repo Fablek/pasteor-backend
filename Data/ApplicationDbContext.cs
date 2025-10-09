@@ -34,8 +34,9 @@ public class ApplicationDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Email).IsRequired().HasMaxLength(255);
             entity.Property(e => e.Provider).IsRequired().HasMaxLength(50);
-            entity.Property(e => e.ProviderId).IsRequired().HasMaxLength(255);
-            entity.HasIndex(e => new { e.Provider, e.ProviderId }).IsUnique();
+            entity.Property(e => e.ProviderId).HasMaxLength(255);
+            entity.Property(e => e.PasswordHash).HasMaxLength(255);
+            entity.HasIndex(e => new { e.Provider, e.ProviderId });
             entity.HasIndex(e => e.Email);
         });
     }
