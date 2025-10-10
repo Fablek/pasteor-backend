@@ -414,6 +414,27 @@ public class PastesController : ControllerBase
 
         return Ok(languages);
     }
+    
+    // GET: api/pastes/{id}/raw
+    [HttpGet("{id}/raw")]
+    public async Task<IActionResult> GetPasteRaw(string id)
+    {
+        var paste = await _context.Pastes.FindAsync(id);
+
+        if (paste == null)
+        {
+            return NotFound(new { error = "Paste not found" });
+        }
+        
+        // Check if paste expired
+        if (paste.ExpiresAt.HasValue && paste.ExpiresAt.Value < DateTime.UtcNow)
+        {
+            return NotFound("Paste has expired");
+        }
+        
+        // Return plain text
+        return Content(paste.Content, "text/plain; charset=utf-8");
+    }
 
     private string GenerateShortId()
     {
