@@ -10,6 +10,7 @@ public class ApplicationDbContext : DbContext
     
     public DbSet<Paste> Pastes { get; set; }
     public DbSet<User> Users { get; set; }
+    public DbSet<Comment> Comments { get; set; } 
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -38,6 +39,25 @@ public class ApplicationDbContext : DbContext
             entity.Property(e => e.PasswordHash).HasMaxLength(255);
             entity.HasIndex(e => new { e.Provider, e.ProviderId });
             entity.HasIndex(e => e.Email);
+        });
+
+        modelBuilder.Entity<Comment>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Content).IsRequired().HasMaxLength(2000);
+            entity.Property(e => e.AuthorName).HasMaxLength(100);
+            entity.HasIndex(e => e.PasteId);
+            entity.HasIndex(e => e.CreatedAt);
+
+            entity.HasOne(e => e.Paste)
+                .WithMany(p => p.Comments)
+                .HasForeignKey(e => e.PasteId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
     }
 }
